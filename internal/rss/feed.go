@@ -41,11 +41,8 @@ func (c *Checker) FetchLatestItems(ctx context.Context, feedURL string) ([]*Feed
 	}
 
 	// Limit the number of items to return
-	maxItems := len(feed.Items)
-	items := make([]*FeedItem, 0, maxItems)
-	for i := 0; i < maxItems; i++ {
-		item := feed.Items[i]
-
+	items := make([]*FeedItem, 0, len(feed.Items))
+	for _, item := range feed.Items {
 		published := time.Now()
 		if item.PublishedParsed != nil {
 			published = *item.PublishedParsed

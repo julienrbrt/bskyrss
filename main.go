@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -242,23 +243,42 @@ func checkAndPost(ctx context.Context, rssChecker *rss.Checker, bskyClient *blue
 }
 
 func formatPost(item *rss.FeedItem) string {
-	// Start with title
-	text := item.Title
-
-	// Add link if available
+	// Collect all unique URLs
+	urls := []string{}
 	if item.Link != "" {
-		text += "\n\n" + item.Link
+		urls = append(urls, item.Link)
+	}
+
+	// Add GUID if it's a URL and different from link (e.g., HN comment links)
+	if item.GUID != "" && item.GUID != item.Link {
+		if u, err := url.Parse(item.GUID); err == nil && (u.Scheme == "http" || u.Scheme == "https") {
+			urls = append(urls, item.GUID)
+		}
+	}
+
+	// Build post: title + links
+	text := item.Title
+	if len(urls) > 0 {
+		text += "\n" + strings.Join(urls, "\n")
 	}
 
 	// Truncate if too long
 	if len(text) > maxPostLength {
-		// Try to truncate title intelligently
-		maxTitleLen := maxPostLength - len(item.Link) - 5 // 5 for "\n\n" and "..."
-		if maxTitleLen > 0 {
-			text = truncateText(item.Title, maxTitleLen) + "...\n\n" + item.Link
+		linkText := ""
+		if len(urls) > 0 {
+			linkText = "\n" + strings.Join(urls, "\n")
+		}
+
+		availableForTitle := maxPostLength - len(linkText) - 3 // 3 for "..."
+		if availableForTitle > 20 {
+			text = truncateText(item.Title, availableForTitle) + "..." + linkText
 		} else {
-			// If even with minimal title it's too long, just use the link
-			text = item.Link
+			// Title too long even truncated, use just first URL or truncated title
+			if len(urls) > 0 {
+				text = urls[0]
+			} else {
+				text = truncateText(item.Title, maxPostLength-3) + "..."
+			}
 		}
 	}
 

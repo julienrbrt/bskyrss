@@ -14,10 +14,10 @@ go install pkg.rbrt.fr/bskyrss@latest
 
 ```bash
 docker run -d \
-  --name bksy-rss-post \
+  --name bksyrss \
   -v $(pwd)/data:/data \
   -e BSKY_PASSWORD="your-app-password" \
-  bksy-rss-post \
+  bksyrss \
   -feed "https://example.com/feed.xml" \
   -handle "your-handle.bsky.social" \
   -storage /data/posted_items.txt
@@ -28,7 +28,7 @@ docker run -d \
 ### Basic Usage
 
 ```bash
-./bksy-rss-post \
+./bksyrss \
   -feed "https://example.com/feed.xml" \
   -handle "your-handle.bsky.social" \
   -password "your-app-password"
@@ -39,7 +39,7 @@ docker run -d \
 Monitor multiple feeds by separating URLs with commas:
 
 ```bash
-./bksy-rss-post \
+./bksyrss \
   -feed "https://blog1.com/feed.xml,https://blog2.com/rss,https://news.com/atom.xml" \
   -handle "your-handle.bsky.social" \
   -password "your-app-password"
@@ -49,7 +49,7 @@ or
 
 ```bash
 export BSKY_PASSWORD="your-app-password"
-./bksy-rss-post \
+./bksyrss \
   -feed "https://example.com/feed.xml" \
   -handle "your-handle.bsky.social"
 ```
@@ -73,7 +73,7 @@ export BSKY_PASSWORD="your-app-password"
 #### Monitor multiple feeds
 
 ```bash
-./bksy-rss-post \
+./bksyrss \
   -feed "https://blog.com/rss,https://news.com/atom.xml,https://podcast.com/feed" \
   -handle "your-handle.bsky.social"
 ```
@@ -81,7 +81,7 @@ export BSKY_PASSWORD="your-app-password"
 #### Check feeds every 5 minutes
 
 ```bash
-./bksy-rss-post \
+./bksyrss \
   -feed "https://example.com/feed.xml" \
   -handle "your-handle.bsky.social" \
   -interval 5m
@@ -90,7 +90,7 @@ export BSKY_PASSWORD="your-app-password"
 #### Test without posting (dry-run mode)
 
 ```bash
-./bksy-rss-post \
+./bksyrss \
   -feed "https://example.com/feed.xml" \
   -handle "your-handle.bsky.social" \
   -dry-run
@@ -99,10 +99,10 @@ export BSKY_PASSWORD="your-app-password"
 #### Use custom storage file
 
 ```bash
-./bksy-rss-post \
+./bksyrss \
   -feed "https://example.com/feed.xml" \
   -handle "your-handle.bsky.social" \
-  -storage /var/lib/bksy-rss-post/posted.txt
+  -storage /var/lib/bksyrss/posted.txt
 ```
 
 ## Bluesky Authentication
@@ -120,7 +120,7 @@ It's recommended to use an App Password instead of your main account password:
 If you're using a self-hosted Personal Data Server:
 
 ```bash
-./bksy-rss-post \
+./bksyrss \
   -feed "https://example.com/feed.xml" \
   -handle "your-handle.your-pds.com" \
   -pds "https://your-pds.com"

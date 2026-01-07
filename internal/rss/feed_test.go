@@ -53,7 +53,7 @@ func TestFetchLatestItems(t *testing.T) {
 
 	// Test fetching all items
 	t.Run("FetchAllItems", func(t *testing.T) {
-		items, err := checker.FetchLatestItems(context.Background(), server.URL, 0)
+		items, err := checker.FetchLatestItems(context.Background(), server.URL)
 		if err != nil {
 			t.Fatalf("Failed to fetch items: %v", err)
 		}
@@ -74,18 +74,6 @@ func TestFetchLatestItems(t *testing.T) {
 		}
 	})
 
-	// Test limiting items
-	t.Run("FetchLimitedItems", func(t *testing.T) {
-		items, err := checker.FetchLatestItems(context.Background(), server.URL, 2)
-		if err != nil {
-			t.Fatalf("Failed to fetch items: %v", err)
-		}
-
-		if len(items) != 2 {
-			t.Errorf("Expected 2 items, got %d", len(items))
-		}
-	})
-
 	// Test with context timeout
 	t.Run("ContextTimeout", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
@@ -93,7 +81,7 @@ func TestFetchLatestItems(t *testing.T) {
 
 		time.Sleep(2 * time.Millisecond) // Ensure context is expired
 
-		_, err := checker.FetchLatestItems(ctx, server.URL, 0)
+		_, err := checker.FetchLatestItems(ctx, server.URL)
 		if err == nil {
 			t.Error("Expected error with expired context, got nil")
 		}
@@ -103,7 +91,7 @@ func TestFetchLatestItems(t *testing.T) {
 func TestFetchLatestItems_InvalidURL(t *testing.T) {
 	checker := NewChecker()
 
-	_, err := checker.FetchLatestItems(context.Background(), "not-a-valid-url", 0)
+	_, err := checker.FetchLatestItems(context.Background(), "not-a-valid-url")
 	if err == nil {
 		t.Error("Expected error with invalid URL, got nil")
 	}
@@ -127,7 +115,7 @@ func TestFetchLatestItems_EmptyFeed(t *testing.T) {
 	defer server.Close()
 
 	checker := NewChecker()
-	items, err := checker.FetchLatestItems(context.Background(), server.URL, 0)
+	items, err := checker.FetchLatestItems(context.Background(), server.URL)
 
 	if err != nil {
 		t.Fatalf("Expected no error with empty feed, got: %v", err)
@@ -163,7 +151,7 @@ func TestFeedItem_GUIDFallback(t *testing.T) {
 	defer server.Close()
 
 	checker := NewChecker()
-	items, err := checker.FetchLatestItems(context.Background(), server.URL, 0)
+	items, err := checker.FetchLatestItems(context.Background(), server.URL)
 
 	if err != nil {
 		t.Fatalf("Failed to fetch items: %v", err)

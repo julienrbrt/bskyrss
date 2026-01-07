@@ -61,14 +61,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize storage: %v", err)
 	}
-
-	// Determine if this is the first run (no items in storage)
-	isFirstRun := store.Count() == 0
-	if isFirstRun {
-		log.Println("First run detected - will mark existing items as seen without posting")
-	} else {
-		log.Printf("Storage initialized with %d previously posted items", store.Count())
-	}
+	log.Printf("Storage initialized with %d previously posted items", store.Count())
 
 	rssChecker := rss.NewChecker()
 
@@ -111,7 +104,7 @@ func main() {
 	defer ticker.Stop()
 
 	// Check immediately on startup
-	if err := checkAndPostFeeds(ctx, rssChecker, bskyClient, store, feeds, *dryRun, isFirstRun); err != nil {
+	if err := checkAndPostFeeds(ctx, rssChecker, bskyClient, store, feeds, *dryRun); err != nil {
 		log.Printf("Error during initial check: %v", err)
 	}
 
@@ -121,7 +114,7 @@ func main() {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := checkAndPostFeeds(ctx, rssChecker, bskyClient, store, feeds, *dryRun, false); err != nil {
+			if err := checkAndPostFeeds(ctx, rssChecker, bskyClient, store, feeds, *dryRun); err != nil {
 				log.Printf("Error during check: %v", err)
 			}
 		}
@@ -147,9 +140,9 @@ func parseFeedURLs(feedString string) []string {
 	return feeds
 }
 
-func checkAndPostFeeds(ctx context.Context, rssChecker *rss.Checker, bskyClient *bluesky.Client, store *storage.Storage, feedURLs []string, dryRun bool, isFirstRun bool) error {
+func checkAndPostFeeds(ctx context.Context, rssChecker *rss.Checker, bskyClient *bluesky.Client, store *storage.Storage, feedURLs []string, dryRun bool) error {
 	for _, feedURL := range feedURLs {
-		if err := checkAndPost(ctx, rssChecker, bskyClient, store, feedURL, dryRun, isFirstRun); err != nil {
+		if err := checkAndPost(ctx, rssChecker, bskyClient, store, feedURL, dryRun); err != nil {
 			log.Printf("Error checking feed %s: %v", feedURL, err)
 			// Continue with other feeds even if one fails
 		}
@@ -158,24 +151,24 @@ func checkAndPostFeeds(ctx context.Context, rssChecker *rss.Checker, bskyClient 
 	return nil
 }
 
-func checkAndPost(
-	ctx context.Context,
-	rssChecker *rss.Checker,
-	bskyClient *bluesky.Client,
-	store *storage.Storage,
-	feedURL string,
-	dryRun bool,
-	isFirstRun bool,
-) error {
+func checkAndPost(ctx context.Context, rssChecker *rss.Checker, bskyClient *bluesky.Client, store *storage.Storage, feedURL string, dryRun bool) error {
 	log.Printf("Checking RSS feed: %s", feedURL)
 
-	limit := 20
-	items, err := rssChecker.FetchLatestItems(ctx, feedURL, limit)
+	items, err := rssChecker.FetchLatestItems(ctx, feedURL)
 	if err != nil {
 		return fmt.Errorf("failed to fetch RSS items: %w", err)
 	}
 
 	log.Printf("Found %d items in feed", len(items))
+
+	// Check if this is the first time seeing this feed (no items from it in storage)
+	hasSeenFeedBefore := false
+	for _, item := range items {
+		if store.IsPosted(item.GUID) {
+			hasSeenFeedBefore = true
+			break
+		}
+	}
 
 	// Process items in reverse order (oldest first)
 	newItemCount := 0
@@ -191,8 +184,8 @@ func checkAndPost(
 
 		newItemCount++
 
-		// On first run, just mark items as seen without posting
-		if isFirstRun {
+		// If this is first time seeing this feed, mark items as seen without posting
+		if !hasSeenFeedBefore {
 			if err := store.MarkPosted(item.GUID); err != nil {
 				log.Printf("Failed to mark item as seen: %v", err)
 			}
@@ -228,14 +221,14 @@ func checkAndPost(
 		}
 
 		// Rate limiting - wait a bit between posts to avoid overwhelming Bluesky
-		if postedCount > 0 && !dryRun && !isFirstRun {
+		if postedCount > 0 && !dryRun {
 			time.Sleep(2 * time.Second)
 		}
 	}
 
-	if isFirstRun {
+	if !hasSeenFeedBefore {
 		if newItemCount > 0 {
-			log.Printf("Marked %d items as seen from feed %s", newItemCount, feedURL)
+			log.Printf("New feed detected: marked %d items as seen from %s (not posted)", newItemCount, feedURL)
 		}
 	} else {
 		if newItemCount == 0 {

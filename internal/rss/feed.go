@@ -30,7 +30,7 @@ func NewChecker() *Checker {
 }
 
 // FetchLatestItems fetches the latest items from an RSS feed
-func (c *Checker) FetchLatestItems(ctx context.Context, feedURL string, limit int) ([]*FeedItem, error) {
+func (c *Checker) FetchLatestItems(ctx context.Context, feedURL string) ([]*FeedItem, error) {
 	feed, err := c.parser.ParseURLWithContext(feedURL, ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse RSS feed: %w", err)
@@ -42,10 +42,6 @@ func (c *Checker) FetchLatestItems(ctx context.Context, feedURL string, limit in
 
 	// Limit the number of items to return
 	maxItems := len(feed.Items)
-	if limit > 0 && limit < maxItems {
-		maxItems = limit
-	}
-
 	items := make([]*FeedItem, 0, maxItems)
 	for i := 0; i < maxItems; i++ {
 		item := feed.Items[i]

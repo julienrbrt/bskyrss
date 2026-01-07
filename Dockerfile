@@ -1,11 +1,11 @@
 FROM golang:1.25-alpine AS builder
 WORKDIR /build
 COPY . .
-RUN go build -o bksyrss -ldflags="-w -s" .
+RUN go install -ldflags="-w -s" .
 
 FROM alpine:latest
 RUN apk --no-cache add ca-certificates
 WORKDIR /app
-COPY --from=builder /build/bksyrss .
+COPY --from=builder /go/bin/bskyrss .
 VOLUME ["/data"]
-ENTRYPOINT ["./bksyrss"]
+ENTRYPOINT ["./bskyrss"]

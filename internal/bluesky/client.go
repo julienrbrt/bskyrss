@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bluesky-social/indigo/api/atproto"
@@ -17,6 +18,8 @@ type Client struct {
 	xrpcClient *xrpc.Client
 	handle     string
 	did        string
+	config     Config
+	mu         sync.Mutex // protects token refresh
 }
 
 // Config holds configuration for Bluesky client
@@ -56,6 +59,7 @@ func NewClient(ctx context.Context, cfg Config) (*Client, error) {
 		xrpcClient: xrpcClient,
 		handle:     auth.Handle,
 		did:        auth.Did,
+		config:     cfg,
 	}, nil
 }
 
@@ -85,7 +89,64 @@ func (c *Client) Post(ctx context.Context, text string) error {
 
 	_, err := atproto.RepoCreateRecord(ctx, c.xrpcClient, input)
 	if err != nil {
+		// Check if token expired and retry once after refresh
+		if c.isExpiredTokenError(err) {
+			if refreshErr := c.refreshSession(ctx); refreshErr != nil {
+				return fmt.Errorf("failed to create post: %w (refresh failed: %v)", err, refreshErr)
+			}
+			// Retry the post after refreshing
+			_, err = atproto.RepoCreateRecord(ctx, c.xrpcClient, input)
+			if err != nil {
+				return fmt.Errorf("failed to create post after refresh: %w", err)
+			}
+			return nil
+		}
 		return fmt.Errorf("failed to create post: %w", err)
+	}
+
+	return nil
+}
+
+// isExpiredTokenError checks if the error is due to an expired token
+func (c *Client) isExpiredTokenError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "ExpiredToken") || strings.Contains(errStr, "Token has expired")
+}
+
+// refreshSession refreshes the authentication session
+func (c *Client) refreshSession(ctx context.Context) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Check if someone else already refreshed while we were waiting
+	if c.xrpcClient.Auth != nil && c.xrpcClient.Auth.RefreshJwt != "" {
+		// Try to use the refresh token
+		refresh, err := atproto.ServerRefreshSession(ctx, c.xrpcClient)
+		if err == nil {
+			c.xrpcClient.Auth.AccessJwt = refresh.AccessJwt
+			c.xrpcClient.Auth.RefreshJwt = refresh.RefreshJwt
+			return nil
+		}
+		// If refresh failed, fall through to re-authentication
+	}
+
+	// If refresh token doesn't work, re-authenticate with password
+	auth, err := atproto.ServerCreateSession(ctx, c.xrpcClient, &atproto.ServerCreateSession_Input{
+		Identifier: c.config.Handle,
+		Password:   c.config.Password,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to re-authenticate: %w", err)
+	}
+
+	c.xrpcClient.Auth = &xrpc.AuthInfo{
+		AccessJwt:  auth.AccessJwt,
+		RefreshJwt: auth.RefreshJwt,
+		Handle:     auth.Handle,
+		Did:        auth.Did,
 	}
 
 	return nil

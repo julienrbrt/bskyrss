@@ -1,0 +1,42 @@
+# bskyrss configuration file
+# This file allows you to map different RSS/Atom feeds to different Bluesky accounts
+
+# List of accounts with their associated feeds
+accounts:
+  # First account - posts from multiple feeds
+  - handle: "user1.bsky.social"
+    # Password can be plain text (not recommended) or environment variable reference
+    # Use ${VAR_NAME} or $VAR_NAME format for environment variables
+    password: "${BSKY_PASSWORD_USER1}"
+    # Optional: Custom PDS server (defaults to https://bsky.social)
+    pds: "https://bsky.social"
+    # Optional: Custom storage file for this account (defaults to global storage with account suffix)
+    # storage: "user1_posted.txt"
+    feeds:
+      - "https://example.com/feed.xml"
+      - "https://blog.example.com/rss"
+      - "https://news.example.com/atom.xml"
+
+  # Second account - posts from different feeds
+  - handle: "user2.bsky.social"
+    password: "${BSKY_PASSWORD_USER2}"
+    feeds:
+      - "https://another-blog.com/feed.xml"
+      - "https://tech-news.com/rss"
+
+  # Third account - posts from a single feed
+  - handle: "user3.bsky.social"
+    password: "${BSKY_PASSWORD_USER3}"
+    pds: "https://custom-pds.example.com"
+    feeds:
+      - "https://personal-blog.com/feed.xml"
+
+# Global settings (optional)
+# Poll interval for checking feeds (default: 15m)
+# Valid units: s, m, h (e.g., "30s", "5m", "1h")
+interval: "15m"
+
+# Default storage file for tracking posted items (default: posted_items.txt)
+# When multiple accounts are configured, separate files will be created automatically
+# (e.g., posted_items_user1_bsky_social.txt, posted_items_user2_bsky_social.txt)
+storage: "posted_items.txt"

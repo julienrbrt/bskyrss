@@ -2,6 +2,12 @@
 
 Tool to automatically post on Bluesky when new items are added to RSS/Atom feeds.
 
+Supports:
+
+- Multiple feeds posting to a single account
+- Different feeds posting to different accounts
+- Flexible configuration via YAML config file
+
 ## Installation
 
 ### Go Binary
@@ -15,95 +21,80 @@ go install pkg.rbrt.fr/bskyrss@latest
 ```bash
 docker run -d \
   --name bksyrss \
+  -v $(pwd)/config.yaml:/config.yaml \
   -v $(pwd)/data:/data \
   -e BSKY_PASSWORD="your-app-password" \
   bksyrss \
-  -feed "https://example.com/feed.xml" \
-  -handle "your-handle.bsky.social" \
-  -storage /data/posted_items.txt
+  -config /config.yaml
 ```
 
 ## Usage
 
-### Basic Usage
+### Basic Setup
 
-```bash
-./bksyrss \
-  -feed "https://example.com/feed.xml" \
-  -handle "your-handle.bsky.social" \
-  -password "your-app-password"
+bskyrss requires a YAML configuration file to run. Create a `config.yaml` file:
+
+```yaml
+accounts:
+  - handle: "your-handle.bsky.social"
+    password: "${BSKY_PASSWORD}"
+    feeds:
+      - "https://example.com/feed.xml"
 ```
 
-### Multiple Feeds
-
-Monitor multiple feeds by separating URLs with commas:
-
-```bash
-./bksyrss \
-  -feed "https://blog1.com/feed.xml,https://blog2.com/rss,https://news.com/atom.xml" \
-  -handle "your-handle.bsky.social" \
-  -password "your-app-password"
-```
-
-or
+Set your password as an environment variable:
 
 ```bash
 export BSKY_PASSWORD="your-app-password"
-./bksyrss \
-  -feed "https://example.com/feed.xml" \
-  -handle "your-handle.bsky.social"
 ```
 
-### Command Line Options
-
-| Flag        | Description                                       | Required | Default             |
-| ----------- | ------------------------------------------------- | -------- | ------------------- |
-| `-feed`     | RSS/Atom feed URL(s) to monitor (comma-delimited) | Yes      | -                   |
-| `-handle`   | Bluesky handle (e.g., user.bsky.social)           | Yes      | -                   |
-| `-password` | Bluesky password or app password                  | Yes\*    | -                   |
-| `-pds`      | Bluesky PDS server URL                            | No       | https://bsky.social |
-| `-interval` | Poll interval for checking RSS feed               | No       | 15m                 |
-| `-storage`  | File to store posted item GUIDs                   | No       | posted_items.txt    |
-| `-dry-run`  | Don't post, just show what would be posted        | No       | false               |
-
-\*Can be provided via `BSKY_PASSWORD` environment variable instead
-
-### Examples
-
-#### Monitor multiple feeds
+Run bskyrss:
 
 ```bash
-./bksyrss \
-  -feed "https://blog.com/rss,https://news.com/atom.xml,https://podcast.com/feed" \
-  -handle "your-handle.bsky.social"
+./bskyrss -config config.yaml
 ```
 
-#### Check feeds every 5 minutes
+### Multiple Feeds to One Account
+
+```yaml
+accounts:
+  - handle: "your-handle.bsky.social"
+    password: "${BSKY_PASSWORD}"
+    feeds:
+      - "https://example.com/feed.xml"
+      - "https://blog.example.com/rss"
+      - "https://news.example.com/atom.xml"
+```
+
+### Multiple Accounts with Different Feeds
+
+Map different feeds to different Bluesky accounts:
+
+```yaml
+accounts:
+  - handle: "tech-news.bsky.social"
+    password: "${BSKY_PASSWORD_TECH}"
+    feeds:
+      - "https://hackernews.com/rss"
+      - "https://techcrunch.com/feed"
+
+  - handle: "personal.bsky.social"
+    password: "${BSKY_PASSWORD_PERSONAL}"
+    feeds:
+      - "https://personal-blog.com/feed.xml"
+
+interval: "15m"
+```
+
+Set environment variables:
 
 ```bash
-./bksyrss \
-  -feed "https://example.com/feed.xml" \
-  -handle "your-handle.bsky.social" \
-  -interval 5m
+export BSKY_PASSWORD_TECH="tech-app-password"
+export BSKY_PASSWORD_PERSONAL="personal-app-password"
+./bskyrss -config config.yaml
 ```
 
-#### Test without posting (dry-run mode)
-
-```bash
-./bksyrss \
-  -feed "https://example.com/feed.xml" \
-  -handle "your-handle.bsky.social" \
-  -dry-run
-```
-
-#### Use custom storage file
-
-```bash
-./bksyrss \
-  -feed "https://example.com/feed.xml" \
-  -handle "your-handle.bsky.social" \
-  -storage /var/lib/bksyrss/posted.txt
-```
+See [`config.example.yaml`](config.example.yaml) for a complete example with all options.
 
 ## Bluesky Authentication
 
@@ -113,17 +104,34 @@ It's recommended to use an App Password instead of your main account password:
 
 1. Go to Bluesky Settings → App Passwords
 2. Create a new App Password
-3. Use this password with the `-password` flag or `BSKY_PASSWORD` environment variable
+3. Use this password in your config file (via environment variable)
+
+### Environment Variables
+
+Passwords should be provided via environment variables for security:
+
+```yaml
+accounts:
+  - handle: "user.bsky.social"
+    password: "${BSKY_PASSWORD}" # References $BSKY_PASSWORD env var
+```
+
+Supported formats:
+
+- `${VAR_NAME}` - Standard format
+- `$VAR_NAME` - Short format
 
 ### Self-hosted PDS
 
 If you're using a self-hosted Personal Data Server:
 
-```bash
-./bksyrss \
-  -feed "https://example.com/feed.xml" \
-  -handle "your-handle.your-pds.com" \
-  -pds "https://your-pds.com"
+```yaml
+accounts:
+  - handle: "your-handle.your-pds.com"
+    password: "${BSKY_PASSWORD}"
+    pds: "https://your-pds.com"
+    feeds:
+      - "https://example.com/feed.xml"
 ```
 
 ## Post Format
@@ -145,6 +153,21 @@ Posts are formatted as follows:
 The tool maintains a simple text file (default: `posted_items.txt`) containing the GUIDs of all posted items. This ensures that items are not posted multiple times, even if the tool is restarted.
 
 The storage file contains one GUID per line and is safe to manually edit if needed.
+
+### Multiple Accounts
+
+When using multiple accounts, separate storage files are automatically created for each account (e.g., `posted_items_user1_bsky_social.txt`, `posted_items_user2_bsky_social.txt`). This ensures that each account tracks its own posted items independently.
+
+You can also specify custom storage files per account in the configuration file:
+
+```yaml
+accounts:
+  - handle: "user1.bsky.social"
+    storage: "custom_storage_user1.txt"
+    password: "${BSKY_PASSWORD_1}"
+    feeds:
+      - "https://feed1.com/rss"
+```
 
 ### First Run Behavior
 

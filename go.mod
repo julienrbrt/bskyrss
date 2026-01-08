@@ -5,6 +5,7 @@ go 1.25.4
 require (
 	github.com/bluesky-social/indigo v0.0.0-20260103083015-78a1c1894f36
 	github.com/mmcdole/gofeed v1.3.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"pkg.rbrt.fr/bskyrss/internal/bluesky"
+	"pkg.rbrt.fr/bskyrss/internal/config"
 	"pkg.rbrt.fr/bskyrss/internal/rss"
 	"pkg.rbrt.fr/bskyrss/internal/storage"
 )
@@ -25,65 +26,31 @@ const (
 
 func main() {
 	// Command line flags
-	feedURLs := flag.String("feed", "", "RSS/Atom feed URL(s) to monitor (comma-delimited for multiple feeds, required)")
-	handle := flag.String("handle", "", "Bluesky handle (required)")
-	password := flag.String("password", "", "Bluesky password (can also use BSKY_PASSWORD env var)")
-	pds := flag.String("pds", "https://bsky.social", "Bluesky PDS server URL")
-	pollInterval := flag.Duration("interval", defaultPollInterval, "Poll interval for checking RSS feed")
-	storageFile := flag.String("storage", defaultStorageFile, "File to store posted item GUIDs")
+	configFile := flag.String("config", "config.yaml", "Path to configuration file (YAML)")
 	dryRun := flag.Bool("dry-run", false, "Don't actually post to Bluesky, just show what would be posted")
 	flag.Parse()
 
-	// Validate required flags
-	if *feedURLs == "" {
-		log.Fatal("Error: -feed flag is required")
-	}
-	if *handle == "" {
-		log.Fatal("Error: -handle flag is required")
+	// Load configuration from file
+	if *configFile == "" {
+		log.Fatal("Error: -config flag is required")
 	}
 
-	// Parse comma-delimited feed URLs
-	feeds := parseFeedURLs(*feedURLs)
-	if len(feeds) == 0 {
-		log.Fatal("Error: no valid feed URLs provided")
-	}
-	log.Printf("Monitoring %d feed(s)", len(feeds))
-
-	// Get password from flag or environment variable
-	bskyPassword := *password
-	if bskyPassword == "" {
-		bskyPassword = os.Getenv("BSKY_PASSWORD")
-		if bskyPassword == "" {
-			log.Fatal("Error: -password flag or BSKY_PASSWORD environment variable is required")
-		}
-	}
-
-	store, err := storage.New(*storageFile)
+	cfg, err := config.LoadFromFile(*configFile)
 	if err != nil {
-		log.Fatalf("Failed to initialize storage: %v", err)
+		log.Fatalf("Failed to load config file: %v", err)
 	}
-	log.Printf("Storage initialized with %d previously posted items", store.Count())
+	log.Printf("Loaded configuration with %d account(s)", len(cfg.Accounts))
 
-	rssChecker := rss.NewChecker()
-
-	// Initialize Bluesky client (unless dry-run mode)
-	var bskyClient *bluesky.Client
-	if !*dryRun {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-
-		bskyClient, err = bluesky.NewClient(ctx, bluesky.Config{
-			Handle:   *handle,
-			Password: bskyPassword,
-			PDS:      *pds,
-		})
-		if err != nil {
-			log.Fatalf("Failed to initialize Bluesky client: %v", err)
-		}
-		log.Printf("Authenticated as @%s", bskyClient.GetHandle())
-	} else {
+	if *dryRun {
 		log.Println("Running in DRY-RUN mode - no posts will be made")
 	}
+
+	// Count total feeds across all accounts
+	totalFeeds := 0
+	for _, account := range cfg.Accounts {
+		totalFeeds += len(account.Feeds)
+	}
+	log.Printf("Monitoring %d feed(s) across %d account(s)", totalFeeds, len(cfg.Accounts))
 
 	// Setup signal handling for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -98,74 +65,128 @@ func main() {
 		cancel()
 	}()
 
-	// Main loop
-	log.Printf("Poll interval: %s", *pollInterval)
+	// Initialize managers for each account
+	managers := make([]*AccountManager, 0, len(cfg.Accounts))
+	for i, account := range cfg.Accounts {
+		// Determine storage file for this account
+		storageFilePath := cfg.Storage
+		if account.Storage != "" {
+			storageFilePath = account.Storage
+		} else if len(cfg.Accounts) > 1 {
+			// For multiple accounts, use separate storage files by default
+			ext := ".txt"
+			base := strings.TrimSuffix(cfg.Storage, ext)
+			storageFilePath = fmt.Sprintf("%s_%s%s", base, sanitizeHandle(account.Handle), ext)
+		}
 
-	ticker := time.NewTicker(*pollInterval)
+		manager, err := NewAccountManager(ctx, account, storageFilePath, *dryRun)
+		if err != nil {
+			log.Fatalf("Failed to initialize account %d (%s): %v", i+1, account.Handle, err)
+		}
+		managers = append(managers, manager)
+		log.Printf("Initialized account: @%s with %d feed(s) (storage: %s)", account.Handle, len(account.Feeds), storageFilePath)
+	}
+
+	log.Printf("Poll interval: %s", cfg.Interval)
+
+	ticker := time.NewTicker(cfg.Interval)
 	defer ticker.Stop()
 
 	// Check immediately on startup
-	if err := checkAndPostFeeds(ctx, rssChecker, bskyClient, store, feeds, *dryRun); err != nil {
-		log.Printf("Error during initial check: %v", err)
+	for _, manager := range managers {
+		if err := manager.CheckAndPost(ctx); err != nil {
+			log.Printf("Error during initial check for @%s: %v", manager.account.Handle, err)
+		}
 	}
 
-	// Continue checking on interval (not first run anymore after first check)
+	// Continue checking on interval
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := checkAndPostFeeds(ctx, rssChecker, bskyClient, store, feeds, *dryRun); err != nil {
-				log.Printf("Error during check: %v", err)
+			for _, manager := range managers {
+				if err := manager.CheckAndPost(ctx); err != nil {
+					log.Printf("Error during check for @%s: %v", manager.account.Handle, err)
+				}
 			}
 		}
 	}
 }
 
-// parseFeedURLs splits comma-delimited feed URLs and trims whitespace
-func parseFeedURLs(feedString string) []string {
-	if feedString == "" {
-		return nil
+// AccountManager manages RSS checking and posting for a single Bluesky account
+type AccountManager struct {
+	account    config.Account
+	bskyClient *bluesky.Client
+	rssChecker *rss.Checker
+	store      *storage.Storage
+	dryRun     bool
+}
+
+// NewAccountManager creates a new account manager
+func NewAccountManager(ctx context.Context, account config.Account, storageFile string, dryRun bool) (*AccountManager, error) {
+	store, err := storage.New(storageFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize storage: %w", err)
 	}
 
-	parts := strings.Split(feedString, ",")
-	feeds := make([]string, 0, len(parts))
+	rssChecker := rss.NewChecker()
 
-	for _, part := range parts {
-		trimmed := strings.TrimSpace(part)
-		if trimmed != "" {
-			feeds = append(feeds, trimmed)
+	var bskyClient *bluesky.Client
+	if !dryRun {
+		authCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+
+		pds := account.PDS
+		if pds == "" {
+			pds = "https://bsky.social"
+		}
+
+		bskyClient, err = bluesky.NewClient(authCtx, bluesky.Config{
+			Handle:   account.Handle,
+			Password: account.Password,
+			PDS:      pds,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize Bluesky client: %w", err)
 		}
 	}
 
-	return feeds
+	return &AccountManager{
+		account:    account,
+		bskyClient: bskyClient,
+		rssChecker: rssChecker,
+		store:      store,
+		dryRun:     dryRun,
+	}, nil
 }
 
-func checkAndPostFeeds(ctx context.Context, rssChecker *rss.Checker, bskyClient *bluesky.Client, store *storage.Storage, feedURLs []string, dryRun bool) error {
-	for _, feedURL := range feedURLs {
-		if err := checkAndPost(ctx, rssChecker, bskyClient, store, feedURL, dryRun); err != nil {
-			log.Printf("Error checking feed %s: %v", feedURL, err)
+// CheckAndPost checks all feeds for this account and posts new items
+func (m *AccountManager) CheckAndPost(ctx context.Context) error {
+	for _, feedURL := range m.account.Feeds {
+		if err := m.checkAndPostFeed(ctx, feedURL); err != nil {
+			log.Printf("[@%s] Error checking feed %s: %v", m.account.Handle, feedURL, err)
 			// Continue with other feeds even if one fails
 		}
 	}
-
 	return nil
 }
 
-func checkAndPost(ctx context.Context, rssChecker *rss.Checker, bskyClient *bluesky.Client, store *storage.Storage, feedURL string, dryRun bool) error {
-	log.Printf("Checking RSS feed: %s", feedURL)
+// checkAndPostFeed checks a single feed and posts new items
+func (m *AccountManager) checkAndPostFeed(ctx context.Context, feedURL string) error {
+	log.Printf("[@%s] Checking RSS feed: %s", m.account.Handle, feedURL)
 
-	items, err := rssChecker.FetchLatestItems(ctx, feedURL)
+	items, err := m.rssChecker.FetchLatestItems(ctx, feedURL)
 	if err != nil {
 		return fmt.Errorf("failed to fetch RSS items: %w", err)
 	}
 
-	log.Printf("Found %d items in feed", len(items))
+	log.Printf("[@%s] Found %d items in feed", m.account.Handle, len(items))
 
 	// Check if this is the first time seeing this feed (no items from it in storage)
 	hasSeenFeedBefore := false
 	for _, item := range items {
-		if store.IsPosted(item.GUID) {
+		if m.store.IsPosted(item.GUID) {
 			hasSeenFeedBefore = true
 			break
 		}
@@ -179,7 +200,7 @@ func checkAndPost(ctx context.Context, rssChecker *rss.Checker, bskyClient *blue
 		item := items[i]
 
 		// Skip if already posted
-		if store.IsPosted(item.GUID) {
+		if m.store.IsPosted(item.GUID) {
 			continue
 		}
 
@@ -187,55 +208,55 @@ func checkAndPost(ctx context.Context, rssChecker *rss.Checker, bskyClient *blue
 
 		// If this is first time seeing this feed, mark items as seen without posting
 		if !hasSeenFeedBefore {
-			if err := store.MarkPosted(item.GUID); err != nil {
-				log.Printf("Failed to mark item as seen: %v", err)
+			if err := m.store.MarkPosted(item.GUID); err != nil {
+				log.Printf("[@%s] Failed to mark item as seen: %v", m.account.Handle, err)
 			}
 			continue
 		}
 
-		log.Printf("New item found: %s", item.Title)
+		log.Printf("[@%s] New item found: %s", m.account.Handle, item.Title)
 
 		// Create post text
 		postText := formatPost(item)
 
-		if dryRun {
-			log.Printf("[DRY-RUN] Would post:\n%s\n", postText)
+		if m.dryRun {
+			log.Printf("[@%s] [DRY-RUN] Would post:\n%s\n", m.account.Handle, postText)
 			postedCount++
 		} else {
 			// Post to Bluesky
 			postCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-			err := bskyClient.Post(postCtx, postText)
+			err := m.bskyClient.Post(postCtx, postText)
 			cancel()
 
 			if err != nil {
-				log.Printf("Failed to post item '%s': %v", item.Title, err)
+				log.Printf("[@%s] Failed to post item '%s': %v", m.account.Handle, item.Title, err)
 				continue
 			}
 
-			log.Printf("Successfully posted: %s", item.Title)
+			log.Printf("[@%s] Successfully posted: %s", m.account.Handle, item.Title)
 			postedCount++
 		}
 
 		// Mark as posted
-		if err := store.MarkPosted(item.GUID); err != nil {
-			log.Printf("Failed to mark item as posted: %v", err)
+		if err := m.store.MarkPosted(item.GUID); err != nil {
+			log.Printf("[@%s] Failed to mark item as posted: %v", m.account.Handle, err)
 		}
 
-		// Rate limiting - wait a bit between posts to avoid overwhelming Bluesky
-		if postedCount > 0 && !dryRun {
+		// Rate limiting ourselves to not get rate limited.
+		if postedCount > 0 && !m.dryRun {
 			time.Sleep(2 * time.Second)
 		}
 	}
 
 	if !hasSeenFeedBefore {
 		if newItemCount > 0 {
-			log.Printf("New feed detected: marked %d items as seen from %s (not posted)", newItemCount, feedURL)
+			log.Printf("[@%s] New feed detected: marked %d items as seen from %s (not posted)", m.account.Handle, newItemCount, feedURL)
 		}
 	} else {
 		if newItemCount == 0 {
-			log.Printf("No new items in feed %s", feedURL)
+			log.Printf("[@%s] No new items in feed %s", m.account.Handle, feedURL)
 		} else {
-			log.Printf("Processed %d new items from feed %s (%d posted)", newItemCount, feedURL, postedCount)
+			log.Printf("[@%s] Processed %d new items from feed %s (%d posted)", m.account.Handle, newItemCount, feedURL, postedCount)
 		}
 	}
 
@@ -298,4 +319,12 @@ func truncateText(text string, maxLen int) string {
 	}
 
 	return truncated
+}
+
+// sanitizeHandle removes special characters from handle for use in filenames
+func sanitizeHandle(handle string) string {
+	// Replace dots and @ with underscores
+	sanitized := strings.ReplaceAll(handle, ".", "_")
+	sanitized = strings.ReplaceAll(sanitized, "@", "")
+	return sanitized
 }

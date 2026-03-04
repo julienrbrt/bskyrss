@@ -38,11 +38,15 @@ const maxJitter = 750 * time.Millisecond
 // capturingTransport stores the last response so we can read Retry-After,
 // which gofeed.HTTPError does not expose.
 type capturingTransport struct {
-	inner    http.RoundTripper
-	lastResp *http.Response
+	inner     http.RoundTripper
+	userAgent string
+	lastResp  *http.Response
 }
 
 func (t *capturingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req = req.Clone(req.Context())
+	req.Header.Set("User-Agent", t.userAgent)
+	req.Header.Set("Accept", "application/rss+xml, application/atom+xml, application/xml, text/xml, */*")
 	resp, err := t.inner.RoundTrip(req)
 	if resp != nil {
 		t.lastResp = resp
@@ -71,7 +75,7 @@ func (c *Checker) FetchLatestItems(ctx context.Context, feedURL string, opts con
 		}
 	}
 
-	transport := &capturingTransport{inner: http.DefaultTransport}
+	transport := &capturingTransport{inner: http.DefaultTransport, userAgent: opts.UserAgent}
 	parser := gofeed.NewParser()
 	parser.Client = &http.Client{Timeout: opts.Timeout, Transport: transport}
 	parser.UserAgent = opts.UserAgent

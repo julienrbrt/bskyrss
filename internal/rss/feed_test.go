@@ -6,10 +6,13 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"pkg.rbrt.fr/bskyrss/internal/config"
 )
 
+var defaultOpts = config.FeedOptions{}
+
 func TestFetchLatestItems(t *testing.T) {
-	// Create a test RSS feed
 	testFeed := `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
 	<channel>
@@ -40,7 +43,6 @@ func TestFetchLatestItems(t *testing.T) {
 	</channel>
 </rss>`
 
-	// Create a test server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/rss+xml")
 		w.WriteHeader(http.StatusOK)
@@ -48,12 +50,10 @@ func TestFetchLatestItems(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// Create checker
 	checker := NewChecker()
 
-	// Test fetching all items
 	t.Run("FetchAllItems", func(t *testing.T) {
-		items, err := checker.FetchLatestItems(context.Background(), server.URL)
+		items, err := checker.FetchLatestItems(context.Background(), server.URL, defaultOpts)
 		if err != nil {
 			t.Fatalf("Failed to fetch items: %v", err)
 		}
@@ -62,7 +62,6 @@ func TestFetchLatestItems(t *testing.T) {
 			t.Errorf("Expected 3 items, got %d", len(items))
 		}
 
-		// Check first item
 		if items[0].Title != "Test Item 1" {
 			t.Errorf("Expected title 'Test Item 1', got '%s'", items[0].Title)
 		}
@@ -74,16 +73,35 @@ func TestFetchLatestItems(t *testing.T) {
 		}
 	})
 
-	// Test with context timeout
 	t.Run("ContextTimeout", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
 		defer cancel()
 
-		time.Sleep(2 * time.Millisecond) // Ensure context is expired
+		time.Sleep(2 * time.Millisecond)
 
-		_, err := checker.FetchLatestItems(ctx, server.URL)
+		_, err := checker.FetchLatestItems(ctx, server.URL, defaultOpts)
 		if err == nil {
 			t.Error("Expected error with expired context, got nil")
+		}
+	})
+
+	t.Run("CustomUserAgent", func(t *testing.T) {
+		var gotUA string
+		uaServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotUA = r.Header.Get("User-Agent")
+			w.Header().Set("Content-Type", "application/rss+xml")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(testFeed))
+		}))
+		defer uaServer.Close()
+
+		opts := config.FeedOptions{UserAgent: "my-custom-agent/2.0"}
+		_, err := checker.FetchLatestItems(context.Background(), uaServer.URL, opts)
+		if err != nil {
+			t.Fatalf("Unexpected error: %v", err)
+		}
+		if gotUA != "my-custom-agent/2.0" {
+			t.Errorf("Expected User-Agent 'my-custom-agent/2.0', got '%s'", gotUA)
 		}
 	})
 }
@@ -91,7 +109,7 @@ func TestFetchLatestItems(t *testing.T) {
 func TestFetchLatestItems_InvalidURL(t *testing.T) {
 	checker := NewChecker()
 
-	_, err := checker.FetchLatestItems(context.Background(), "not-a-valid-url")
+	_, err := checker.FetchLatestItems(context.Background(), "not-a-valid-url", defaultOpts)
 	if err == nil {
 		t.Error("Expected error with invalid URL, got nil")
 	}
@@ -115,19 +133,17 @@ func TestFetchLatestItems_EmptyFeed(t *testing.T) {
 	defer server.Close()
 
 	checker := NewChecker()
-	items, err := checker.FetchLatestItems(context.Background(), server.URL)
+	items, err := checker.FetchLatestItems(context.Background(), server.URL, defaultOpts)
 
 	if err != nil {
 		t.Fatalf("Expected no error with empty feed, got: %v", err)
 	}
-
 	if len(items) != 0 {
 		t.Errorf("Expected 0 items, got %d", len(items))
 	}
 }
 
 func TestFeedItem_GUIDFallback(t *testing.T) {
-	// Feed with no GUID, should use link instead
 	feedNoGUID := `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
 	<channel>
@@ -151,18 +167,68 @@ func TestFeedItem_GUIDFallback(t *testing.T) {
 	defer server.Close()
 
 	checker := NewChecker()
-	items, err := checker.FetchLatestItems(context.Background(), server.URL)
+	items, err := checker.FetchLatestItems(context.Background(), server.URL, defaultOpts)
 
 	if err != nil {
 		t.Fatalf("Failed to fetch items: %v", err)
 	}
-
 	if len(items) != 1 {
 		t.Fatalf("Expected 1 item, got %d", len(items))
 	}
-
-	// GUID should fall back to link
 	if items[0].GUID != "https://example.com/item-no-guid" {
 		t.Errorf("Expected GUID to fallback to link, got '%s'", items[0].GUID)
 	}
 }
+
+func TestFetchLatestItems_RetryOn429(t *testing.T) {
+	attempts := 0
+	feed := `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+	<channel>
+		<title>Feed</title>
+		<link>https://example.com</link>
+		<description>Feed</description>
+		<item>
+			<title>Item</title>
+			<link>https://example.com/item</link>
+			<guid>item-1</guid>
+		</item>
+	</channel>
+</rss>`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts < 3 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.Header().Set("Content-Type", "application/rss+xml")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(feed))
+	}))
+	defer server.Close()
+
+	honorTrue := true
+	zero := time.Duration(0)
+	opts := config.FeedOptions{
+		MaxRetries:      new(3),
+		BaseBackoff:     zero + 1,
+		HonorRetryAfter: &honorTrue,
+	}
+
+	checker := NewChecker()
+	items, err := checker.FetchLatestItems(context.Background(), server.URL, opts)
+	if err != nil {
+		t.Fatalf("Expected success after retries, got: %v", err)
+	}
+	if len(items) != 1 {
+		t.Errorf("Expected 1 item, got %d", len(items))
+	}
+	if attempts != 3 {
+		t.Errorf("Expected 3 attempts, got %d", attempts)
+	}
+}
+
+//go:fix inline
+func intPtr(i int) *int { return new(i) }

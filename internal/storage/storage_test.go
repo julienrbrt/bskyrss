@@ -205,7 +205,7 @@ func TestCount(t *testing.T) {
 	}
 
 	// Add items and check count
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		store.MarkPosted(string(rune('a' + i)))
 		expectedCount := i + 1
 		if store.Count() != expectedCount {
@@ -225,7 +225,7 @@ func TestConcurrentAccess(t *testing.T) {
 
 	// Simulate concurrent access
 	done := make(chan bool)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		go func(id int) {
 			guid := string(rune('a' + id))
 			store.MarkPosted(guid)
@@ -236,7 +236,7 @@ func TestConcurrentAccess(t *testing.T) {
 	}
 
 	// Wait for all goroutines
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		<-done
 	}
 

@@ -30,7 +30,6 @@ func main() {
 	dryRun := flag.Bool("dry-run", false, "Don't actually post to Bluesky, just show what would be posted")
 	flag.Parse()
 
-	// Load configuration from file
 	if *configFile == "" {
 		log.Fatal("Error: -config flag is required")
 	}
@@ -52,7 +51,6 @@ func main() {
 	}
 	log.Printf("Monitoring %d feed(s) across %d account(s)", totalFeeds, len(cfg.Accounts))
 
-	// Setup signal handling for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -68,7 +66,6 @@ func main() {
 	// Initialize managers for each account
 	managers := make([]*AccountManager, 0, len(cfg.Accounts))
 	for i, account := range cfg.Accounts {
-		// Determine storage file for this account
 		storageFilePath := cfg.Storage
 		if account.Storage != "" {
 			storageFilePath = account.Storage
@@ -79,7 +76,7 @@ func main() {
 			storageFilePath = fmt.Sprintf("%s_%s%s", base, sanitizeHandle(account.Handle), ext)
 		}
 
-		manager, err := NewAccountManager(ctx, account, storageFilePath, *dryRun)
+		manager, err := NewAccountManager(ctx, cfg, account, storageFilePath, *dryRun)
 		if err != nil {
 			log.Fatalf("Failed to initialize account %d (%s): %v", i+1, account.Handle, err)
 		}
@@ -99,7 +96,6 @@ func main() {
 		}
 	}
 
-	// Continue checking on interval
 	for {
 		select {
 		case <-ctx.Done():
@@ -114,8 +110,9 @@ func main() {
 	}
 }
 
-// AccountManager manages RSS checking and posting for a single Bluesky account
+// AccountManager manages RSS checking and posting for a single Bluesky account.
 type AccountManager struct {
+	cfg        *config.Config
 	account    config.Account
 	bskyClient *bluesky.Client
 	rssChecker *rss.Checker
@@ -123,8 +120,8 @@ type AccountManager struct {
 	dryRun     bool
 }
 
-// NewAccountManager creates a new account manager
-func NewAccountManager(ctx context.Context, account config.Account, storageFile string, dryRun bool) (*AccountManager, error) {
+// NewAccountManager creates a new AccountManager.
+func NewAccountManager(ctx context.Context, cfg *config.Config, account config.Account, storageFile string, dryRun bool) (*AccountManager, error) {
 	store, err := storage.New(storageFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize storage: %w", err)
@@ -153,6 +150,7 @@ func NewAccountManager(ctx context.Context, account config.Account, storageFile 
 	}
 
 	return &AccountManager{
+		cfg:        cfg,
 		account:    account,
 		bskyClient: bskyClient,
 		rssChecker: rssChecker,
@@ -161,29 +159,31 @@ func NewAccountManager(ctx context.Context, account config.Account, storageFile 
 	}, nil
 }
 
-// CheckAndPost checks all feeds for this account and posts new items
+// CheckAndPost checks all feeds for this account and posts new items.
 func (m *AccountManager) CheckAndPost(ctx context.Context) error {
-	for _, feedURL := range m.account.Feeds {
-		if err := m.checkAndPostFeed(ctx, feedURL); err != nil {
-			log.Printf("[@%s] Error checking feed %s: %v", m.account.Handle, feedURL, err)
-			// Continue with other feeds even if one fails
+	for _, feed := range m.account.Feeds {
+		if err := m.checkAndPostFeed(ctx, feed); err != nil {
+			log.Printf("[@%s] Error checking feed %s: %v", m.account.Handle, feed.URL, err)
+			// Continue with other feeds even if one fails.
 		}
 	}
 	return nil
 }
 
-// checkAndPostFeed checks a single feed and posts new items
-func (m *AccountManager) checkAndPostFeed(ctx context.Context, feedURL string) error {
-	log.Printf("[@%s] Checking RSS feed: %s", m.account.Handle, feedURL)
+// checkAndPostFeed checks a single feed and posts new items.
+func (m *AccountManager) checkAndPostFeed(ctx context.Context, feed config.FeedConfig) error {
+	log.Printf("[@%s] Checking RSS feed: %s", m.account.Handle, feed.URL)
 
-	items, err := m.rssChecker.FetchLatestItems(ctx, feedURL)
+	opts := m.cfg.Resolved(feed)
+
+	items, err := m.rssChecker.FetchLatestItems(ctx, feed.URL, opts)
 	if err != nil {
 		return fmt.Errorf("failed to fetch RSS items: %w", err)
 	}
 
 	log.Printf("[@%s] Found %d items in feed", m.account.Handle, len(items))
 
-	// Check if this is the first time seeing this feed (no items from it in storage)
+	// Check if this is the first time seeing this feed (no items in storage).
 	hasSeenFeedBefore := false
 	for _, item := range items {
 		if m.store.IsPosted(item.GUID) {
@@ -192,21 +192,20 @@ func (m *AccountManager) checkAndPostFeed(ctx context.Context, feedURL string) e
 		}
 	}
 
-	// Process items in reverse order (oldest first)
+	// Process items in reverse order (oldest first).
 	newItemCount := 0
 	postedCount := 0
 
 	for i := len(items) - 1; i >= 0; i-- {
 		item := items[i]
 
-		// Skip if already posted
 		if m.store.IsPosted(item.GUID) {
 			continue
 		}
 
 		newItemCount++
 
-		// If this is first time seeing this feed, mark items as seen without posting
+		// First time seeing this feed: mark items as seen without posting.
 		if !hasSeenFeedBefore {
 			if err := m.store.MarkPosted(item.GUID); err != nil {
 				log.Printf("[@%s] Failed to mark item as seen: %v", m.account.Handle, err)
@@ -216,14 +215,12 @@ func (m *AccountManager) checkAndPostFeed(ctx context.Context, feedURL string) e
 
 		log.Printf("[@%s] New item found: %s", m.account.Handle, item.Title)
 
-		// Create post text
 		postText := formatPost(item)
 
 		if m.dryRun {
 			log.Printf("[@%s] [DRY-RUN] Would post:\n%s\n", m.account.Handle, postText)
 			postedCount++
 		} else {
-			// Post to Bluesky
 			postCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			err := m.bskyClient.Post(postCtx, postText)
 			cancel()
@@ -237,12 +234,11 @@ func (m *AccountManager) checkAndPostFeed(ctx context.Context, feedURL string) e
 			postedCount++
 		}
 
-		// Mark as posted
 		if err := m.store.MarkPosted(item.GUID); err != nil {
 			log.Printf("[@%s] Failed to mark item as posted: %v", m.account.Handle, err)
 		}
 
-		// Rate limiting ourselves to not get rate limited.
+		// Small self-imposed delay between posts to avoid Bluesky rate limits.
 		if postedCount > 0 && !m.dryRun {
 			time.Sleep(2 * time.Second)
 		}
@@ -250,13 +246,13 @@ func (m *AccountManager) checkAndPostFeed(ctx context.Context, feedURL string) e
 
 	if !hasSeenFeedBefore {
 		if newItemCount > 0 {
-			log.Printf("[@%s] New feed detected: marked %d items as seen from %s (not posted)", m.account.Handle, newItemCount, feedURL)
+			log.Printf("[@%s] New feed detected: marked %d items as seen from %s (not posted)", m.account.Handle, newItemCount, feed.URL)
 		}
 	} else {
 		if newItemCount == 0 {
-			log.Printf("[@%s] No new items in feed %s", m.account.Handle, feedURL)
+			log.Printf("[@%s] No new items in feed %s", m.account.Handle, feed.URL)
 		} else {
-			log.Printf("[@%s] Processed %d new items from feed %s (%d posted)", m.account.Handle, newItemCount, feedURL, postedCount)
+			log.Printf("[@%s] Processed %d new items from feed %s (%d posted)", m.account.Handle, newItemCount, feed.URL, postedCount)
 		}
 	}
 
@@ -264,26 +260,23 @@ func (m *AccountManager) checkAndPostFeed(ctx context.Context, feedURL string) e
 }
 
 func formatPost(item *rss.FeedItem) string {
-	// Collect all unique URLs
 	urls := []string{}
 	if item.Link != "" {
 		urls = append(urls, item.Link)
 	}
 
-	// Add GUID if it's a URL and different from link (e.g., HN comment links)
+	// Add GUID if it's a URL and different from link (e.g. HN comment links).
 	if item.GUID != "" && item.GUID != item.Link {
 		if u, err := url.Parse(item.GUID); err == nil && (u.Scheme == "http" || u.Scheme == "https") {
 			urls = append(urls, item.GUID)
 		}
 	}
 
-	// Build post: title + links
 	text := item.Title
 	if len(urls) > 0 {
 		text += "\n" + strings.Join(urls, "\n")
 	}
 
-	// Truncate if too long
 	if len(text) > maxPostLength {
 		linkText := ""
 		if len(urls) > 0 {
@@ -294,7 +287,6 @@ func formatPost(item *rss.FeedItem) string {
 		if availableForTitle > 20 {
 			text = truncateText(item.Title, availableForTitle) + "..." + linkText
 		} else {
-			// Title too long even truncated, use just first URL or truncated title
 			if len(urls) > 0 {
 				text = urls[0]
 			} else {
@@ -310,20 +302,16 @@ func truncateText(text string, maxLen int) string {
 	if len(text) <= maxLen {
 		return text
 	}
-
-	// Try to truncate at word boundary
 	truncated := text[:maxLen]
 	lastSpace := strings.LastIndex(truncated, " ")
 	if lastSpace > maxLen/2 {
 		return text[:lastSpace]
 	}
-
 	return truncated
 }
 
-// sanitizeHandle removes special characters from handle for use in filenames
+// sanitizeHandle replaces characters unsuitable for filenames.
 func sanitizeHandle(handle string) string {
-	// Replace dots and @ with underscores
 	sanitized := strings.ReplaceAll(handle, ".", "_")
 	sanitized = strings.ReplaceAll(sanitized, "@", "")
 	return sanitized

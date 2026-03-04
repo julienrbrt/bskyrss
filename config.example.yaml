@@ -5,38 +5,74 @@
 accounts:
   # First account - posts from multiple feeds
   - handle: "user1.bsky.social"
-    # Password can be plain text (not recommended) or environment variable reference
-    # Use ${VAR_NAME} or $VAR_NAME format for environment variables
+    # Password can be plain text or an environment variable reference.
+    # Use ${VAR_NAME} or $VAR_NAME format for environment variables.
     password: "${BSKY_PASSWORD_USER1}"
     # Optional: Custom PDS server (defaults to https://bsky.social)
     pds: "https://bsky.social"
-    # Optional: Custom storage file for this account (defaults to global storage with account suffix)
+    # Optional: Custom storage file for this account
     # storage: "user1_posted.txt"
     feeds:
+      # Feeds can be plain URLs ...
       - "https://example.com/feed.xml"
       - "https://blog.example.com/rss"
-      - "https://news.example.com/atom.xml"
+      # ... or mappings with per-feed HTTP/pacing overrides.
+      # Any field from the global "defaults" block can be overridden here.
+      - url: "https://old.reddit.com/r/linux/top/.rss?t=week"
+        # Stagger requests to avoid bursting Reddit's rate limits.
+        min_delay: "3s"
+        max_delay: "9s"
+        base_backoff: "30s"
+        max_backoff: "10m"
+        honor_retry_after: true
 
-  # Second account - posts from different feeds
+  # Second account
   - handle: "user2.bsky.social"
     password: "${BSKY_PASSWORD_USER2}"
     feeds:
       - "https://another-blog.com/feed.xml"
-      - "https://tech-news.com/rss"
+      - url: "https://old.reddit.com/r/selfhosted/top/.rss?t=week"
+        min_delay: "3s"
+        max_delay: "9s"
+        base_backoff: "30s"
+        max_backoff: "10m"
+        honor_retry_after: true
 
-  # Third account - posts from a single feed
+  # Third account - single feed, no overrides needed
   - handle: "user3.bsky.social"
     password: "${BSKY_PASSWORD_USER3}"
     pds: "https://custom-pds.example.com"
     feeds:
       - "https://personal-blog.com/feed.xml"
 
-# Global settings (optional)
-# Poll interval for checking feeds (default: 15m)
-# Valid units: s, m, h (e.g., "30s", "5m", "1h")
+# Poll interval (default: 15m). Valid units: s, m, h
 interval: "15m"
 
-# Default storage file for tracking posted items (default: posted_items.txt)
-# When multiple accounts are configured, separate files will be created automatically
-# (e.g., posted_items_user1_bsky_social.txt, posted_items_user2_bsky_social.txt)
+# Storage file for tracking posted items (default: posted_items.txt).
+# With multiple accounts, per-account files are created automatically
+# (e.g. posted_items_user1_bsky_social.txt).
 storage: "posted_items.txt"
+
+# Global feed defaults - applied to every feed unless overridden per-feed above.
+# All fields are optional; hard-coded fallbacks are used when omitted.
+defaults:
+  # A descriptive User-Agent reduces rate-limiting on providers like Reddit.
+  user_agent: "bskyrss/1.0 (+https://pkg.rbrt.fr/bskyrss)"
+
+  # Per-request HTTP timeout.
+  timeout: "30s"
+
+  # Retry settings for transient HTTP errors (429, 5xx ...).
+  # Retries use exponential backoff: base_backoff * 2^attempt, capped at max_backoff.
+  max_retries: 3
+  base_backoff: "2s"
+  max_backoff: "2m"
+
+  # Honour the Retry-After response header when the server sends it (e.g. Reddit 429).
+  honor_retry_after: true
+
+  # Pre-fetch jitter: a random delay in [min_delay, max_delay] added before each
+  # request. Leave both unset (or 0s) to disable. Prefer setting this per-feed
+  # rather than globally so only rate-sensitive feeds are affected.
+  # min_delay: "0s"
+  # max_delay: "0s"

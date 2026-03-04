@@ -1,6 +1,6 @@
 module pkg.rbrt.fr/bskyrss
 
-go 1.25.4
+go 1.26.0
 
 require (
 	github.com/bluesky-social/indigo v0.0.0-20260103083015-78a1c1894f36

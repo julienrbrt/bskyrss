@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math/rand"
 	"net/url"
 	"os"
 	"os/signal"
@@ -168,11 +169,12 @@ func (m *AccountManager) CheckAndPost(ctx context.Context) error {
 		}
 		if i < len(m.account.Feeds)-1 {
 			opts := m.cfg.Resolved(feed)
-			if opts.MinDelay > 0 {
+			if opts.BaseBackoff > 0 {
+				delay := time.Duration(rand.Int63n(int64(opts.BaseBackoff) + 1))
 				select {
 				case <-ctx.Done():
 					return nil
-				case <-time.After(opts.MinDelay):
+				case <-time.After(delay):
 				}
 			}
 		}

@@ -19,9 +19,7 @@ accounts:
       # ... or mappings with per-feed HTTP/pacing overrides.
       # Any field from the global "defaults" block can be overridden here.
       - url: "https://old.reddit.com/r/linux/top/.rss?t=week"
-        # Stagger requests to avoid bursting Reddit's rate limits.
-        min_delay: "3s"
-        max_delay: "9s"
+        # Use a higher base_backoff to space out Reddit requests and handle 429s.
         base_backoff: "30s"
         max_backoff: "10m"
         honor_retry_after: true
@@ -32,8 +30,6 @@ accounts:
     feeds:
       - "https://another-blog.com/feed.xml"
       - url: "https://old.reddit.com/r/selfhosted/top/.rss?t=week"
-        min_delay: "3s"
-        max_delay: "9s"
         base_backoff: "30s"
         max_backoff: "10m"
         honor_retry_after: true
@@ -71,8 +67,5 @@ defaults:
   # Honour the Retry-After response header when the server sends it (e.g. Reddit 429).
   honor_retry_after: true
 
-  # Pre-fetch jitter: a random delay in [min_delay, max_delay] added before each
-  # request. Leave both unset (or 0s) to disable. Prefer setting this per-feed
-  # rather than globally so only rate-sensitive feeds are affected.
-  # min_delay: "0s"
-  # max_delay: "0s"
+  # base_backoff is also used as the upper bound for random inter-feed jitter,
+  # so increasing it for rate-sensitive feeds (e.g. Reddit) spaces out requests.

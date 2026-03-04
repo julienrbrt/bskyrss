@@ -63,18 +63,6 @@ func NewChecker() *Checker { return &Checker{} }
 // FetchLatestItems fetches items from feedURL using opts.
 // opts is expected to be fully resolved (via config.Config.Resolved).
 func (c *Checker) FetchLatestItems(ctx context.Context, feedURL string, opts config.FeedOptions) ([]*FeedItem, error) {
-	if opts.MaxDelay > 0 {
-		lo := opts.MinDelay
-		if lo > opts.MaxDelay {
-			lo = 0
-		}
-		select {
-		case <-ctx.Done():
-			return nil, fmt.Errorf("context cancelled before fetch: %w", ctx.Err())
-		case <-time.After(lo + randomDuration(opts.MaxDelay-lo)):
-		}
-	}
-
 	transport := &capturingTransport{inner: http.DefaultTransport, userAgent: opts.UserAgent}
 	parser := gofeed.NewParser()
 	parser.Client = &http.Client{Timeout: opts.Timeout, Transport: transport}

@@ -61,10 +61,6 @@ type FeedOptions struct {
 	UserAgent string        `yaml:"user_agent,omitempty"`
 	Timeout   time.Duration `yaml:"timeout,omitempty"`
 
-	// Pre-fetch jitter.
-	MinDelay time.Duration `yaml:"min_delay,omitempty"`
-	MaxDelay time.Duration `yaml:"max_delay,omitempty"`
-
 	// Retry / backoff on transient HTTP errors (5xx, 429 …)
 	MaxRetries  *int          `yaml:"max_retries,omitempty"`
 	BaseBackoff time.Duration `yaml:"base_backoff,omitempty"`
@@ -84,8 +80,6 @@ func (c *Config) Resolved(feed FeedConfig) FeedOptions {
 	return FeedOptions{
 		UserAgent:       coalesce(f.UserAgent, g.UserAgent, "bskyrss/1.0 (+https://pkg.rbrt.fr/bskyrss)"),
 		Timeout:         coalesce(f.Timeout, g.Timeout, 30*time.Second),
-		MinDelay:        coalesce(f.MinDelay, g.MinDelay, 0),
-		MaxDelay:        coalesce(f.MaxDelay, g.MaxDelay, 0),
 		MaxRetries:      coalesce(f.MaxRetries, g.MaxRetries, new(3)),
 		BaseBackoff:     coalesce(f.BaseBackoff, g.BaseBackoff, 2*time.Second),
 		MaxBackoff:      coalesce(f.MaxBackoff, g.MaxBackoff, 2*time.Minute),
@@ -169,15 +163,6 @@ func (c *Config) Validate() error {
 func validateFeedOptions(prefix string, o FeedOptions) error {
 	if o.Timeout < 0 {
 		return fmt.Errorf("%s.timeout must be >= 0", prefix)
-	}
-	if o.MinDelay < 0 {
-		return fmt.Errorf("%s.min_delay must be >= 0", prefix)
-	}
-	if o.MaxDelay < 0 {
-		return fmt.Errorf("%s.max_delay must be >= 0", prefix)
-	}
-	if o.MinDelay > 0 && o.MaxDelay > 0 && o.MinDelay > o.MaxDelay {
-		return fmt.Errorf("%s.min_delay must be <= max_delay", prefix)
 	}
 	if o.BaseBackoff < 0 {
 		return fmt.Errorf("%s.base_backoff must be >= 0", prefix)

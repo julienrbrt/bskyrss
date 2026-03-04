@@ -84,8 +84,6 @@ accounts:
       - "https://plain-url.com/rss"
       - url: "https://mapping-url.com/rss"
         user_agent: "custom-agent/1.0"
-        min_delay: "2s"
-        max_delay: "6s"
         base_backoff: "10s"
         max_backoff: "5m"
         honor_retry_after: false
@@ -120,12 +118,6 @@ accounts:
 	if feeds[1].Options.UserAgent != "custom-agent/1.0" {
 		t.Errorf("Expected UserAgent 'custom-agent/1.0', got '%s'", feeds[1].Options.UserAgent)
 	}
-	if feeds[1].Options.MinDelay != 2*time.Second {
-		t.Errorf("Expected MinDelay 2s, got %v", feeds[1].Options.MinDelay)
-	}
-	if feeds[1].Options.MaxDelay != 6*time.Second {
-		t.Errorf("Expected MaxDelay 6s, got %v", feeds[1].Options.MaxDelay)
-	}
 	if feeds[1].Options.BaseBackoff != 10*time.Second {
 		t.Errorf("Expected BaseBackoff 10s, got %v", feeds[1].Options.BaseBackoff)
 	}
@@ -152,8 +144,7 @@ accounts:
 
 defaults:
   user_agent: "global-agent/1.0"
-  min_delay: "1s"
-  max_delay: "4s"
+  base_backoff: "10s"
 `
 
 	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
@@ -170,9 +161,6 @@ defaults:
 	if plain.UserAgent != "global-agent/1.0" {
 		t.Errorf("Expected global UserAgent for plain feed, got '%s'", plain.UserAgent)
 	}
-	if plain.MinDelay != 1*time.Second {
-		t.Errorf("Expected MinDelay 1s from global defaults, got %v", plain.MinDelay)
-	}
 	// Timeout should fall back to hard-coded default
 	if plain.Timeout != 30*time.Second {
 		t.Errorf("Expected default Timeout 30s, got %v", plain.Timeout)
@@ -183,9 +171,9 @@ defaults:
 	if overridden.UserAgent != "per-feed-agent/1.0" {
 		t.Errorf("Expected per-feed UserAgent, got '%s'", overridden.UserAgent)
 	}
-	// Global delay still inherited
-	if overridden.MinDelay != 1*time.Second {
-		t.Errorf("Expected MinDelay 1s inherited from global, got %v", overridden.MinDelay)
+	// BaseBackoff should be inherited from global defaults
+	if overridden.BaseBackoff != 10*time.Second {
+		t.Errorf("Expected BaseBackoff 10s inherited from global, got %v", overridden.BaseBackoff)
 	}
 }
 
@@ -298,20 +286,6 @@ accounts:
     password: "password1"
     feeds:
       - url: ""
-`,
-			wantErr: true,
-		},
-		{
-			name: "defaults min_delay > max_delay",
-			content: `
-accounts:
-  - handle: "user1.bsky.social"
-    password: "password1"
-    feeds:
-      - "https://feed1.com/rss"
-defaults:
-  min_delay: "10s"
-  max_delay: "5s"
 `,
 			wantErr: true,
 		},

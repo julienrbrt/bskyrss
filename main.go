@@ -161,10 +161,20 @@ func NewAccountManager(ctx context.Context, cfg *config.Config, account config.A
 
 // CheckAndPost checks all feeds for this account and posts new items.
 func (m *AccountManager) CheckAndPost(ctx context.Context) error {
-	for _, feed := range m.account.Feeds {
+	for i, feed := range m.account.Feeds {
 		if err := m.checkAndPostFeed(ctx, feed); err != nil {
 			log.Printf("[@%s] Error checking feed %s: %v", m.account.Handle, feed.URL, err)
 			// Continue with other feeds even if one fails.
+		}
+		if i < len(m.account.Feeds)-1 {
+			opts := m.cfg.Resolved(feed)
+			if opts.MinDelay > 0 {
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-time.After(opts.MinDelay):
+				}
+			}
 		}
 	}
 	return nil

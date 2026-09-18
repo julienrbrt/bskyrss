@@ -68,7 +68,9 @@ func TestIsPosted(t *testing.T) {
 	}
 
 	// Mark as posted
-	store.MarkPosted(guid)
+	if err := store.MarkPosted(guid); err != nil {
+		t.Fatalf("Failed to mark item as posted: %v", err)
+	}
 
 	// Should be posted now
 	if !store.IsPosted(guid) {
@@ -124,8 +126,12 @@ func TestMarkPosted_Duplicate(t *testing.T) {
 	guid := "duplicate-guid"
 
 	// Mark twice
-	store.MarkPosted(guid)
-	store.MarkPosted(guid)
+	if err := store.MarkPosted(guid); err != nil {
+		t.Fatalf("Failed to mark item as posted: %v", err)
+	}
+	if err := store.MarkPosted(guid); err != nil {
+		t.Fatalf("Failed to mark item as posted: %v", err)
+	}
 
 	// Should still only count as one
 	if store.Count() != 1 {
@@ -143,11 +149,9 @@ func TestLoad_EmptyFile(t *testing.T) {
 	storagePath := filepath.Join(tempDir, "empty.txt")
 
 	// Create empty file
-	file, err := os.Create(storagePath)
-	if err != nil {
+	if err := os.WriteFile(storagePath, nil, 0644); err != nil {
 		t.Fatalf("Failed to create empty file: %v", err)
 	}
-	file.Close()
 
 	// Load storage
 	store, err := New(storagePath)
@@ -206,7 +210,9 @@ func TestCount(t *testing.T) {
 
 	// Add items and check count
 	for i := range 5 {
-		store.MarkPosted(string(rune('a' + i)))
+		if err := store.MarkPosted(string(rune('a' + i))); err != nil {
+			t.Fatalf("Failed to mark item as posted: %v", err)
+		}
 		expectedCount := i + 1
 		if store.Count() != expectedCount {
 			t.Errorf("After adding %d items, expected count %d, got %d", expectedCount, expectedCount, store.Count())
@@ -228,7 +234,9 @@ func TestConcurrentAccess(t *testing.T) {
 	for i := range 10 {
 		go func(id int) {
 			guid := string(rune('a' + id))
-			store.MarkPosted(guid)
+			if err := store.MarkPosted(guid); err != nil {
+				t.Errorf("Failed to mark item as posted: %v", err)
+			}
 			_ = store.IsPosted(guid)
 			_ = store.Count()
 			done <- true

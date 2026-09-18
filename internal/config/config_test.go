@@ -178,8 +178,7 @@ defaults:
 }
 
 func TestLoadFromFileWithEnvVars(t *testing.T) {
-	os.Setenv("TEST_PASSWORD", "env-password")
-	defer os.Unsetenv("TEST_PASSWORD")
+	t.Setenv("TEST_PASSWORD", "env-password")
 
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
@@ -370,8 +369,7 @@ func TestExpandEnvVar(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.envKey != "" {
-				os.Setenv(tt.envKey, tt.envValue)
-				defer os.Unsetenv(tt.envKey)
+				t.Setenv(tt.envKey, tt.envValue)
 			}
 
 			got := expandEnvVar(tt.input)

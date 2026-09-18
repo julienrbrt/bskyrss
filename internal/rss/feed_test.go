@@ -46,7 +46,7 @@ func TestFetchLatestItems(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/rss+xml")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(testFeed))
+		_, _ = w.Write([]byte(testFeed))
 	}))
 	defer server.Close()
 
@@ -91,7 +91,7 @@ func TestFetchLatestItems(t *testing.T) {
 			gotUA = r.Header.Get("User-Agent")
 			w.Header().Set("Content-Type", "application/rss+xml")
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(testFeed))
+			_, _ = w.Write([]byte(testFeed))
 		}))
 		defer uaServer.Close()
 
@@ -128,7 +128,7 @@ func TestFetchLatestItems_EmptyFeed(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/rss+xml")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(emptyFeed))
+		_, _ = w.Write([]byte(emptyFeed))
 	}))
 	defer server.Close()
 
@@ -162,7 +162,7 @@ func TestFeedItem_GUIDFallback(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/rss+xml")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(feedNoGUID))
+		_, _ = w.Write([]byte(feedNoGUID))
 	}))
 	defer server.Close()
 
@@ -205,7 +205,7 @@ func TestFetchLatestItems_RetryOn429(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/rss+xml")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(feed))
+		_, _ = w.Write([]byte(feed))
 	}))
 	defer server.Close()
 
@@ -229,6 +229,3 @@ func TestFetchLatestItems_RetryOn429(t *testing.T) {
 		t.Errorf("Expected 3 attempts, got %d", attempts)
 	}
 }
-
-//go:fix inline
-func intPtr(i int) *int { return new(i) }

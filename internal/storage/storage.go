@@ -30,7 +30,7 @@ func New(filePath string) (*Storage, error) {
 }
 
 // load reads the posted items from disk
-func (s *Storage) load() error {
+func (s *Storage) load() (err error) {
 	file, err := os.Open(s.filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -39,7 +39,11 @@ func (s *Storage) load() error {
 		}
 		return err
 	}
-	defer file.Close()
+	defer func() {
+		if cerr := file.Close(); err == nil {
+			err = cerr
+		}
+	}()
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -53,12 +57,16 @@ func (s *Storage) load() error {
 }
 
 // save writes the posted items to disk
-func (s *Storage) save() error {
+func (s *Storage) save() (err error) {
 	file, err := os.Create(s.filePath)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() {
+		if cerr := file.Close(); err == nil {
+			err = cerr
+		}
+	}()
 
 	writer := bufio.NewWriter(file)
 	for guid := range s.posted {

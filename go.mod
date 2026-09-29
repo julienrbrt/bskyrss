@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/bluesky-social/indigo v0.0.0-20260903211445-41278964ec8e
-	github.com/mmcdole/gofeed v1.4.2
+	github.com/mmcdole/gofeed v1.5.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
